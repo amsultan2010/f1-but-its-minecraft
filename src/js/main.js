@@ -313,6 +313,7 @@ async function ensureWorld() {
 
 // park the car on the grid (menus) or spawn it for a race
 let carY = 0, carVy = 0, prevGy = null;
+const gTilt = { p: 0, r: 0 };
 function placeCarAt(s) {
   const t = world.track, N = t.N;
   const i = ((Math.floor(s) % N) + N) % N;
@@ -1210,13 +1211,17 @@ function syncCarTransform(dt) {
   const gRoll = Math.atan2((hFL + hRL) / 2 - (hFR + hRR) / 2, hw * 2);
   car.root.position.set(ox, carY, oz);
   car.root.rotation.order = 'YXZ';
-  car.root.rotation.set(-gPitch, veh.yaw, gRoll);
+  // ground tilt is smoothed so block edges near the verge do not rock the car
+  const kg = dt > 0 ? Math.min(1, dt * 9) : 1;
+  gTilt.p += (gPitch - gTilt.p) * kg; gTilt.r += (gRoll - gTilt.r) * kg;
+  car.root.rotation.set(-gTilt.p, veh.yaw, gTilt.r);
   if (dt > 0) {
     const P = veh.P;
     const dn = 0.5 * 1.2 * veh.u * veh.u * lerp(P.claZ, P.claX, veh.aeroMode);
     car.chassis.position.y += ((-dn / 900000) - car.chassis.position.y) * Math.min(1, dt * 10);
-    car.chassis.rotation.x += (clamp(-veh.ax * 0.0016, -0.03, 0.03) - car.chassis.rotation.x) * Math.min(1, dt * 8);
-    car.chassis.rotation.z += (clamp(-veh.ay * 0.0012, -0.025, 0.025) - car.chassis.rotation.z) * Math.min(1, dt * 8);
+    car.chassis.rotation.x += (clamp(-veh.ax * 0.0008, -0.015, 0.015) - car.chassis.rotation.x) * Math.min(1, dt * 5);
+    // body roll: an F1 car barely rolls (stiff suspension), so keep it subtle and slow
+    car.chassis.rotation.z += (clamp(-veh.ay * 0.00035, -0.007, 0.007) - car.chassis.rotation.z) * Math.min(1, dt * 3.5);
     for (const w of car.wheels) {
       w.spin.rotation.x += (w.front ? veh.wf : veh.wr) * dt;
       if (w.front) w.steer.rotation.y = -veh.delta;

@@ -4152,126 +4152,101 @@ var Vehicle = class {
 
 // src/js/audio.js
 var PROC = `
-function DL(n){ this.d=new Float32Array(Math.max(1,n|0)); this.i=0; }
-DL.prototype.get=function(){ return this.d[this.i]; };
-DL.prototype.pushL=function(v){ this.d[this.i]=v; this.i++; if(this.i>=this.d.length)this.i=0; };
-DL.prototype.pushR=function(v){ this.d[this.i]=v; this.i--; if(this.i<0)this.i=this.d.length-1; };
-function WG(n, rl, rr){ this.u=new DL(n); this.l=new DL(n); this.rl=rl; this.rr=rr; this.oL=0; this.oR=0; }
-WG.prototype.add=function(vl, vr){
-  const lo=this.l.get(), up=this.u.get();
-  const refL=lo*this.rl; this.oL=lo*(1-this.rl);
-  const refR=up*this.rr; this.oR=up*(1-this.rr);
-  this.u.pushR(vl+refL); this.l.pushL(vr+refR);
-};
-const ERA = [
-  // 2026: raw, high-revving V6 with less turbo damping than 2021, strong electric whine
-  { intake: 34, exhaust: 58, extractor: 26, pipe: 96, muffler: [6, 9, 13], action: 0.12, outlet: 30, ign: 0.018, jitter: 0.06,
-    wOut: 1.0, wIn: 0.55, wBlock: 0.25, drive: 2.0, bright: 1.0, turbo: 0.016, mguk: 0.03 },
-  // 2021: turbo + MGU-H muffled, deeper and smoother
-  { intake: 40, exhaust: 70, extractor: 34, pipe: 150, muffler: [9, 14, 21, 27], action: 0.22, outlet: 46, ign: 0.02, jitter: 0.04,
-    wOut: 1.0, wIn: 0.45, wBlock: 0.3, drive: 1.6, bright: 0.75, turbo: 0.022, mguk: 0.016 },
-  // 1987: 1.5 L turbo V6 on high boost, open exhausts, harsh and loud
-  { intake: 44, exhaust: 84, extractor: 30, pipe: 72, muffler: [5, 8], action: 0.06, outlet: 22, ign: 0.03, jitter: 0.12,
-    wOut: 1.15, wIn: 0.6, wBlock: 0.2, drive: 2.8, bright: 1.1, turbo: 0.05, mguk: 0 },
-  // 2010: 2.4 L V8 at 18,000 rpm, short open exhausts, the classic scream
-  { intake: 28, exhaust: 46, extractor: 20, pipe: 60, muffler: [4, 7], action: 0.05, outlet: 18, ign: 0.016, jitter: 0.05,
-    wOut: 1.15, wIn: 0.7, wBlock: 0.22, drive: 2.4, bright: 1.25, turbo: 0, mguk: 0 },
-  // 2006: the same V8 formula a little higher and rawer (19,000 rpm)
-  { intake: 26, exhaust: 42, extractor: 18, pipe: 54, muffler: [4, 6], action: 0.04, outlet: 16, ign: 0.016, jitter: 0.06,
-    wOut: 1.2, wIn: 0.75, wBlock: 0.2, drive: 2.6, bright: 1.35, turbo: 0, mguk: 0 },
-];
-function Cyl(e, s){
-  this.cyl=new WG(Math.round(10*s), 0.75, 0.75);
-  this.intake=new WG(Math.round(e.intake*s), 0.01, 0.6);
-  this.exh=new WG(Math.round(e.exhaust*s), 0.95, 0.01);
-  this.ext=new WG(Math.round(e.extractor*s), 0.01, 0.01);
-  this.ign=e.ign;
+// Source-filter engine model: every combustion fires a pressure pulse (one per cylinder per two
+// revolutions); the pulse train runs through the exhaust's fixed resonances (formants), a pipe
+// comb and a little saturation. Pitch therefore follows the firing rate exactly, while the tone
+// (what makes a V10/V8 scream or a turbo V6 growl) comes from the resonances, which do not move.
+function Res(f, q, sr){ // constant-peak band-pass biquad
+  const w=2*Math.PI*f/sr, al=Math.sin(w)/(2*q), a0=1+al;
+  this.b0=al/a0; this.b2=-al/a0; this.a1=-2*Math.cos(w)/a0; this.a2=(1-al)/a0; this.x1=0; this.x2=0; this.y1=0; this.y2=0;
 }
+Res.prototype.run=function(x){ const y=this.b0*x+this.b2*this.x2-this.a1*this.y1-this.a2*this.y2; this.x2=this.x1; this.x1=x; this.y2=this.y1; this.y1=y; return y; };
+const ERA = [
+  // 2026: 1.6 L turbo V6 (3 firings per rev), single exhaust after the turbine: deeper, gruff,
+  // high frequencies damped by the turbo, plus wastegate rasp, turbo whistle and MGU-K whine
+  { formants: [[160, 2.2, 1.0], [430, 3.0, 0.9], [980, 3.5, 0.55], [2100, 4.0, 0.25], [3600, 5.0, 0.08]],
+    comb: 3.3, combFb: -0.55, cylVar: [1, 0.86, 0.95, 1.06, 0.9, 1.0], jitter: 0.035, crack: 0.05, sat: 2.2,
+    lpLo: 900, lpHi: 4200, rasp: 0.22, turbo: 0.018, mguk: 0.032, gain: 2.0 },
+  // 2010: 2.4 L flat-plane V8 limited to 18,000 rpm (4 firings per rev), short open exhausts:
+  // the high, hard-edged scream
+  { formants: [[300, 2.0, 0.28], [900, 2.4, 0.8], [1900, 3.0, 1.0], [3300, 3.5, 0.6], [5200, 4.0, 0.25]],
+    comb: 1.9, combFb: -0.4, cylVar: [1, 0.97, 1.02, 0.96, 0.99, 1.03, 0.97, 1.0], jitter: 0.015, crack: 0.1, sat: 2.5,
+    lpLo: 1400, lpHi: 9000, rasp: 0.26, turbo: 0, mguk: 0, gain: 0.8 },
+  // 2006: first year of the 2.4 L V8, no rev limit (20,000 rpm): rawer and a touch brighter
+  { formants: [[290, 2.0, 0.3], [870, 2.4, 0.78], [2000, 3.0, 1.0], [3600, 3.5, 0.68], [5800, 4.0, 0.32]],
+    comb: 1.7, combFb: -0.4, cylVar: [1, 0.95, 1.03, 0.95, 0.99, 1.05, 0.96, 1.0], jitter: 0.02, crack: 0.13, sat: 2.8,
+    lpLo: 1600, lpHi: 10500, rasp: 0.3, turbo: 0, mguk: 0, gain: 0.72 },
+];
 class Eng {
   constructor(sr){
-    this.sr=sr; this.rev=0; this.seed=1234567; this.n=0;
+    this.sr=sr; this.seed=1234567; this.n=0;
     this.p={rpm:4000,load:0,cyl:6,era:0,boost:0,lim:0,gwF:0,gwA:0,vol:0,lp:1,rmax:12000};
     this.s={rpm:4000,load:0,boost:0,gwF:0,gwA:0,vol:0,lp:1};
-    this.ni=0; this.crank=0; this.blk=0; this.lp1=0; this.lp2=0; this.hp=0; this.hpx=0;
-    this.tph=0; this.kph=0; this.gph=0; this.pop=0; this.popT=0; this.wg=0; this.lastBoost=0; this.limCnt=0; this.lastRev=0;
+    this.fph=0; this.k=0; this.carry=0; this.cnt=0; this.env=0; this.pop=0;
+    this.lp1=0; this.lp2=0; this.hp=0; this.hpx=0; this.cr=0; this.crx=0; this.ni=0;
+    this.tph=0; this.kph=0; this.gph=0; this.lastAmp=1;
     this.build(0);
   }
   rnd(){ this.seed=(this.seed*1664525+1013904223)>>>0; return this.seed/4294967296; }
   build(era){
-    this.era=era; const e=ERA[era]; this.e=e; const s=this.sr/44100;
-    this.cyls=[]; for(let i=0;i<this.p.cyl;i++) this.cyls.push(new Cyl(e,s));
-    this.pipe=new WG(Math.round(e.pipe*s),0.02,0.02);
-    this.muf=e.muffler.map(n=>new WG(Math.max(1,Math.round(n*s)),0.0,e.action)); this.mufL=0; this.mufR=0;
-    this.out=new WG(Math.round(e.outlet*s),0.05,0.05);
+    this.era=era; const e=ERA[era]; this.e=e;
+    this.res=e.formants.map(([f,q,g])=>{ const r=new Res(Math.min(f, this.sr*0.45), q, this.sr); r.g=g; return r; });
+    this.comb=new Float32Array(Math.max(2, Math.round(e.comb*this.sr/1000))); this.ci=0;
   }
   setParams(d){ const era=d.era; Object.assign(this.p,d); if(era!==undefined && era!==this.era) this.build(era); }
   sample(){
-    const p=this.p, s=this.s, e=this.e;
-    s.rpm += (p.rpm - s.rpm) * 0.0035; s.load += (p.load - s.load) * 0.004; s.boost += (p.boost - s.boost) * 0.002;
+    const p=this.p, s=this.s, e=this.e, sr=this.sr;
+    s.rpm += (p.rpm - s.rpm) * 0.004; s.load += (p.load - s.load) * 0.004; s.boost += (p.boost - s.boost) * 0.002;
     s.gwF += (p.gwF - s.gwF) * 0.01; s.gwA += (p.gwA - s.gwA) * 0.003; s.vol += (p.vol - s.vol) * 0.003; s.lp += (p.lp - s.lp) * 0.002;
-    const load = s.load;
-    // intake noise and crank jitter
-    this.ni += 0.7 * ((this.rnd()*2-1) - this.ni);
-    this.crank += 0.002 * ((this.rnd()*2-1)*e.jitter*0.08 - this.crank);
-    const nC=this.cyls.length, inv=1/nC;
-    let block=0, intakeOut=0, pipeIn=0;
-    // limiter: cut most ignitions
-    const cut = p.lim ? ((this.limCnt % 3) !== 0) : false;
-    for(let i=0;i<nC;i++){
-      const c=this.cyls[i];
-      let x=(this.rev + i*(inv + this.crank)) % 1; if(x<0) x+=1;
-      const exV = (x>0.75) ? -Math.sin(4*Math.PI*x) : 0;
-      const inV = (x<0.25) ? Math.sin(4*Math.PI*x) : 0;
-      const piston = Math.cos(4*Math.PI*x);
-      let ign = (x < 0.5*c.ign) ? Math.sin(2*Math.PI*x/c.ign) : 0;
-      ign *= cut ? 0.05 : (0.12 + 0.88*load) * (0.985 + 0.03*((i*7919)%13)/13);
-      const inR = 0.01*inV + 0.95*(1-inV), exR = 0.01*exV + 0.95*(1-exV);
-      c.intake.rr = inR; c.cyl.rl = inR; c.exh.rl = exR; c.cyl.rr = exR;
-      const amp = piston*1.5 + ign*5.0;
-      const exOR=c.exh.oR, extOL=c.ext.oL, cylOL=c.cyl.oL, cylOR=c.cyl.oR, inOR=c.intake.oR;
-      c.ext.add(exOR, this.pipe.oL);
-      c.exh.add(cylOR, extOL);
-      c.cyl.add(amp + inOR*(1-c.intake.rr), extOL*(1-c.exh.rl));
-      c.intake.add(this.ni*inV*(0.3+0.7*load), cylOL*(1-c.intake.rr));
-      block += c.cyl.oL; intakeOut += c.intake.oL; pipeIn += c.ext.oR;
+    const load=s.load, nC=p.cyl, rn=s.rpm/p.rmax;
+    // ---- combustion pulses (fractional timing, so the pitch is clean even at 1,300 Hz)
+    const fireHz = s.rpm/60*nC/2;
+    const inc = fireHz/sr;
+    let x = this.carry; this.carry = 0;
+    this.fph += inc;
+    if (this.fph >= 1) {
+      this.fph -= 1;
+      const frac = this.fph/inc;               // how far past the firing point this sample is
+      this.k = (this.k+1) % nC; this.cnt++;
+      const cut = p.lim && (this.cnt % 3) !== 0;
+      const strength = cut ? 0.06 : (0.22 + 0.78*load);
+      let a = e.cylVar[this.k % e.cylVar.length] * strength * (1 + e.jitter*(this.rnd()*2-1));
+      this.lastAmp = a;
+      x += a*(1-frac); this.carry = a*frac;
+      // overrun: unburnt fuel popping in the exhaust after lifting at high rpm
+      if (load < 0.06 && rn > 0.45 && this.rnd() < 0.02) this.pop = 0.5 + this.rnd()*0.8;
     }
-    const prev = this.rev;
-    this.rev += s.rpm/120/this.sr;
-    if (this.rev >= 1) { this.rev -= 1; }
-    if (Math.floor(prev*nC) !== Math.floor(this.rev*nC)) {
-      this.limCnt++;
-      // overrun crackle: unburnt fuel popping in the exhaust when lifting at high rpm
-      if (load < 0.08 && s.rpm > p.rmax*0.5 && this.rnd() < (this.era===2 ? 0.07 : 0.025)) this.pop = 0.6 + this.rnd()*0.9;
-    }
-    // pipe -> muffler -> outlet
-    this.pipe.add(pipeIn*inv, this.mufL);
-    let mL=0, mR=0; const mi=1/this.muf.length;
-    for (const m of this.muf) { mL+=m.oL; mR+=m.oR; m.add(this.pipe.oR*mi, this.out.oL*mi); }
-    this.mufL=mL; this.mufR=mR;
-    this.out.add(mR, 0);
-    let y = this.out.oR*e.wOut*(1.0 - 0.35*s.lp) + intakeOut*e.wIn*(0.5 + 0.8*s.lp)*0.6;
-    this.blk += 0.02*(block*0.08 - this.blk); y += this.blk*e.wBlock*4*(0.6+0.6*s.lp);
-    if (this.pop > 0.001) { y += this.pop*(this.rnd()*2-1)*0.9; this.pop *= 0.9975; }
-    // drive / saturation
-    const dr = e.drive*(0.7 + 0.6*load);
-    y = Math.tanh(y*0.55*dr)/Math.tanh(dr*0.9);
-    // turbo whistle, MGU-K whine, wastegate chatter, straight-cut gears
-    const tf = 2200 + 6800*s.boost*(s.rpm/p.rmax);
-    this.tph += tf/this.sr; if(this.tph>1)this.tph-=1;
+    // ---- exhaust: formant bank + pipe comb
+    let y = 0;
+    for (const r of this.res) y += r.run(x)*r.g;
+    // sharp edge of each pulse (the metallic crack of an open exhaust)
+    const cr = x - this.crx; this.crx = x; y += cr*e.crack*(0.4+0.6*load);
+    const ci=this.ci, d=this.comb[ci]; this.comb[ci] = y + d*e.combFb; this.ci = (ci+1) % this.comb.length;
+    y = y*0.75 + d*0.45;
+    // intake roar: noise breathing with the firing pulses
+    this.ni += 0.5*((this.rnd()*2-1) - this.ni);
+    this.env += 0.02*(Math.abs(x)*40 - this.env);
+    y += this.ni*Math.min(1,this.env)*e.rasp*(0.3+0.7*load)*(0.4+0.6*rn);
+    if (this.pop > 0.001) { y += this.pop*(this.rnd()*2-1)*0.8; this.pop *= 0.996; }
+    // ---- saturation and tone: brighter and harder with load and rpm
+    const dr = e.sat*(0.6 + 0.6*load);
+    y = Math.tanh(y*2.2*dr)/Math.tanh(dr);
+    const fc = (e.lpLo + (e.lpHi - e.lpLo)*Math.pow(0.35*load + 0.65*rn, 1.2))*(0.75 + 0.25*s.lp);
+    const a1 = 1 - Math.exp(-6.2831853*Math.min(fc, sr*0.45)/sr);
+    this.lp1 += a1*(y - this.lp1); this.lp2 += a1*(this.lp1 - this.lp2);
+    y = this.lp2;
+    // ---- turbo whistle, MGU-K whine, straight-cut gear whine
+    const tf = 2600 + 7000*s.boost*rn;
+    this.tph += tf/sr; if(this.tph>1)this.tph-=1;
     y += Math.sin(this.tph*6.2831853)*s.boost*e.turbo;
-    const kf = s.rpm/60*7.5; this.kph += kf/this.sr; if(this.kph>1)this.kph-=1;
-    y += (Math.sin(this.kph*6.2831853) + 0.35*Math.sin(this.kph*12.566)) * e.mguk*(0.25+load);
-    if (this.era===2) { const db=this.lastBoost-s.boost; this.lastBoost=s.boost; if(db>0.00015) this.wg=Math.min(1,this.wg+db*80); }
-    if (this.wg>0.001) { y += this.wg*(this.rnd()*2-1)*0.3*(0.55+0.45*Math.sin(this.n*0.004)); this.wg*=0.99985; }
-    this.gph += s.gwF/this.sr; if(this.gph>1)this.gph-=1;
+    const kf = s.rpm/60*7.5; this.kph += kf/sr; if(this.kph>1)this.kph-=1;
+    y += (Math.sin(this.kph*6.2831853) + 0.3*Math.sin(this.kph*12.566))*e.mguk*(0.2+0.8*load);
+    this.gph += s.gwF/sr; if(this.gph>1)this.gph-=1;
     y += Math.sin(this.gph*6.2831853)*s.gwA;
-    // tone: two-pole lowpass opening with load, DC block
-    const fc = (1400 + 9000*Math.pow(load, 0.6))*e.bright*(0.65+0.35*s.lp) + 500;
-    const a = 1 - Math.exp(-6.2831853*fc/this.sr);
-    this.lp1 += a*(y - this.lp1); this.lp2 += a*(this.lp1 - this.lp2);
-    const o = this.lp2, out = o - this.hpx + 0.995*this.hp; this.hpx=o; this.hp=out;
+    // DC block
+    const out = y - this.hpx + 0.995*this.hp; this.hpx = y; this.hp = out;
     this.n++;
-    return out*s.vol*0.9;
+    return out*s.vol*e.gain*(0.55 + 0.45*load);
   }
 }
 `;
@@ -4386,7 +4361,7 @@ var Audio = class {
     if (this.ui) this.ui.gain.setTargetAtTime(this.muted ? 0 : 0.9 * this.level, t, 0.02);
   }
   setEra(era, P) {
-    const d = { era: era === "2026" ? 0 : era === "2010" ? 3 : era === "2006" ? 4 : 1, cyl: P.cyl, rmax: P.rpmMax };
+    const d = { era: era === "2026" ? 0 : era === "2010" ? 1 : 2, cyl: P.cyl, rmax: P.rpmMax };
     if (!this.ready) {
       this.pendingEra = d;
       return;
@@ -4443,40 +4418,32 @@ var Audio = class {
     s.start(t, Math.random());
     s.stop(t + 0.08);
   }
-  // Minecraft-like menu click: a short hollow wooden "tock"
+  // Minecraft-style menu click: a dry, crisp wooden "tick" (tight resonant snap + a short
+  // body knock), no tone tail
   uiClick() {
     if (!this.ready || this.muted) return;
     const ctx = this.ctx, t = ctx.currentTime;
-    const o = ctx.createOscillator();
-    o.type = "square";
-    o.frequency.setValueAtTime(1180, t);
-    o.frequency.exponentialRampToValueAtTime(560, t + 0.035);
-    const bp = ctx.createBiquadFilter();
-    bp.type = "bandpass";
-    bp.frequency.value = 1400;
-    bp.Q.value = 1.4;
-    const g = ctx.createGain();
-    g.gain.setValueAtTime(1e-4, t);
-    g.gain.exponentialRampToValueAtTime(0.5, t + 2e-3);
-    g.gain.exponentialRampToValueAtTime(1e-3, t + 0.07);
-    o.connect(bp);
-    bp.connect(g);
-    g.connect(this.ui);
-    o.start(t);
-    o.stop(t + 0.08);
-    const n = ctx.createBufferSource();
-    n.buffer = this.noiseBuf;
-    const hp = ctx.createBiquadFilter();
-    hp.type = "highpass";
-    hp.frequency.value = 3e3;
-    const g2 = ctx.createGain();
-    g2.gain.setValueAtTime(0.35, t);
-    g2.gain.exponentialRampToValueAtTime(1e-3, t + 0.012);
-    n.connect(hp);
-    hp.connect(g2);
-    g2.connect(this.ui);
-    n.start(t, Math.random());
-    n.stop(t + 0.02);
+    const burst = (f, q, peak, dec, delay = 0, type = "bandpass") => {
+      const n = ctx.createBufferSource();
+      n.buffer = this.noiseBuf;
+      const bp = ctx.createBiquadFilter();
+      bp.type = type;
+      bp.frequency.value = f;
+      bp.Q.value = q;
+      const g = ctx.createGain(), t0 = t + delay;
+      g.gain.setValueAtTime(1e-4, t0);
+      g.gain.exponentialRampToValueAtTime(peak, t0 + 8e-4);
+      g.gain.exponentialRampToValueAtTime(1e-4, t0 + dec);
+      n.connect(bp);
+      bp.connect(g);
+      g.connect(this.ui);
+      n.start(t0, Math.random() * 1.5);
+      n.stop(t0 + dec + 0.01);
+    };
+    burst(2300, 5, 1.1, 0.022);
+    burst(3900, 3, 0.35, 0.01);
+    burst(620, 2.5, 0.7, 0.03);
+    burst(1500, 4, 0.25, 0.012, 0.016);
   }
   beep(freq, dur = 0.12, vol = 0.25) {
     if (!this.ready || this.muted) return;
@@ -5190,6 +5157,7 @@ async function ensureWorld() {
 var carY = 0;
 var carVy = 0;
 var prevGy = null;
+var gTilt = { p: 0, r: 0 };
 function placeCarAt(s) {
   const t = world.track, N = t.N;
   const i = (Math.floor(s) % N + N) % N;
@@ -6574,13 +6542,16 @@ function syncCarTransform(dt) {
   const gRoll = Math.atan2((hFL + hRL) / 2 - (hFR + hRR) / 2, hw * 2);
   car.root.position.set(ox, carY, oz);
   car.root.rotation.order = "YXZ";
-  car.root.rotation.set(-gPitch, veh.yaw, gRoll);
+  const kg = dt > 0 ? Math.min(1, dt * 9) : 1;
+  gTilt.p += (gPitch - gTilt.p) * kg;
+  gTilt.r += (gRoll - gTilt.r) * kg;
+  car.root.rotation.set(-gTilt.p, veh.yaw, gTilt.r);
   if (dt > 0) {
     const P = veh.P;
     const dn = 0.5 * 1.2 * veh.u * veh.u * lerp(P.claZ, P.claX, veh.aeroMode);
     car.chassis.position.y += (-dn / 9e5 - car.chassis.position.y) * Math.min(1, dt * 10);
-    car.chassis.rotation.x += (clamp(-veh.ax * 16e-4, -0.03, 0.03) - car.chassis.rotation.x) * Math.min(1, dt * 8);
-    car.chassis.rotation.z += (clamp(-veh.ay * 12e-4, -0.025, 0.025) - car.chassis.rotation.z) * Math.min(1, dt * 8);
+    car.chassis.rotation.x += (clamp(-veh.ax * 8e-4, -0.015, 0.015) - car.chassis.rotation.x) * Math.min(1, dt * 5);
+    car.chassis.rotation.z += (clamp(-veh.ay * 35e-5, -7e-3, 7e-3) - car.chassis.rotation.z) * Math.min(1, dt * 3.5);
     for (const w of car.wheels) {
       w.spin.rotation.x += (w.front ? veh.wf : veh.wr) * dt;
       if (w.front) w.steer.rotation.y = -veh.delta;
