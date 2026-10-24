@@ -1,0 +1,395 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1,maximum-scale=1,user-scalable=no">
+<title>F1 but it's Minecraft</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Tiny5&family=Titillium+Web:ital,wght@0,600;0,700;0,900;1,900&display=swap" rel="stylesheet">
+<style>
+:root{
+  --mc-text:#ffffff; --mc-shadow:#3f3f3f; --mc-gray:#a0a0a0; --mc-yellow:#ffff55; --mc-green:#80ff20;
+  --f1-red:#e10600; --panel:#c6c6c6; --slot:#8b8b8b;
+}
+*{box-sizing:border-box;margin:0;padding:0}
+html,body{width:100%;height:100%;overflow:hidden;background:#000;color:#fff;-webkit-user-select:none;user-select:none}
+body,button{font-family:'Tiny5',monospace}
+#app{position:fixed;left:0;top:0;width:100%;height:100%;overflow:hidden}
+/* phones held upright: the whole game is turned sideways so it always plays in landscape */
+#app.rot{transform-origin:0 0;transform:translateX(var(--vw)) rotate(90deg)}
+canvas#gl{position:absolute;inset:0;width:100%;height:100%;display:block}
+.hidden{display:none!important}
+.mct{color:#fff;text-shadow:2px 2px 0 var(--mc-shadow)}
+.screen{position:fixed;inset:0;display:flex;flex-direction:column;align-items:center}
+img,canvas.px{image-rendering:pixelated}
+
+/* ---------- Minecraft button ---------- */
+.mcb{position:relative;display:flex;align-items:center;justify-content:center;gap:8px;height:44px;min-width:120px;padding:0 14px;
+  font-size:23px;color:#e0e0e0;text-shadow:2px 2px 0 #383838;cursor:pointer;border:2px solid #000;outline:none;
+  background:var(--btn-bg) center/64px repeat, #6f6f6f;image-rendering:pixelated;
+  box-shadow:inset 2px 2px 0 rgba(255,255,255,.45),inset -2px -3px 0 rgba(0,0,0,.45)}
+.mcb:hover,.mcb:focus-visible{color:#ffffa0;border-color:#fff;background-color:#7b86b8;background-blend-mode:multiply}
+.mcb:active{transform:translateY(1px)}
+.mcb.sel{color:#ffff55;border-color:#ffff55}
+.mcb[disabled]{color:#a0a0a0;filter:brightness(.6);cursor:default}
+.mcb .kerb{position:absolute;left:0;right:0;bottom:-2px;height:5px;background:repeating-linear-gradient(90deg,#e10600 0 12px,#fff 12px 24px);border:1px solid #000;border-top:0}
+.mcb.big{height:52px;font-size:26px}
+
+/* ---------- title ---------- */
+#title{justify-content:flex-start;padding-top:max(calc(var(--ah,100vh) * 0.05),24px)}
+#logoWrap{position:relative;display:flex;flex-direction:column;align-items:center}
+#logo{width:min(640px,calc(var(--aw,100vw) * 0.8));height:auto;image-rendering:pixelated;filter:drop-shadow(0 8px 14px rgba(0,0,0,.45))}
+#splash{position:absolute;right:0;top:72%;color:var(--mc-yellow);text-shadow:2px 2px 0 #3f3f00;font-size:clamp(14px,calc(var(--aw,100vw) * 0.022),22px);white-space:nowrap;
+  transform:rotate(-17deg);animation:splash .55s ease-in-out infinite alternate;transform-origin:center}
+@keyframes splash{from{transform:rotate(-17deg) scale(1)}to{transform:rotate(-17deg) scale(1.08)}}
+#titleBtns{margin-top:max(calc(var(--ah,100vh) * 0.05),18px);display:grid;grid-template-columns:1fr 1fr;gap:8px;width:min(400px,calc(var(--aw,100vw) * 0.9))}
+#titleBtns .full{grid-column:1/3}
+#titleBtns .gap{margin-top:12px}
+#titleBtns .mcb{height:40px;font-size:21px}
+#titleSel{margin-top:12px;display:flex;gap:8px;align-items:center;font-size:17px;color:#e0e0e0}
+#titleSel .sw{width:18px;height:18px;border:2px solid #000}
+#ver{position:fixed;left:8px;bottom:44px;font-size:18px}
+#legal{position:fixed;right:8px;bottom:6px;font-size:18px;color:#fff;text-decoration:none}
+#legal:hover,#legal:focus-visible{color:#ffff55;text-decoration:underline;outline:none}
+
+/* ---------- dirt screens (tracks/options) ---------- */
+.dirt{background:var(--dirt-bg) 0 0/64px repeat, #2a1f17;image-rendering:pixelated}
+.dirt.dark{box-shadow:inset 0 0 0 9999px rgba(0,0,0,.55)}
+.mcScreen{justify-content:flex-start}
+.mcScreen .hdr{width:100%;padding:14px 0 10px;text-align:center;font-size:26px;border-bottom:2px solid #000}
+.mcScreen .body{flex:1;width:100%;overflow-y:auto;background:rgba(0,0,0,.55);display:flex;justify-content:center;padding:14px 10px}
+.mcScreen .ftr{width:100%;padding:12px;display:flex;gap:10px;justify-content:center;border-top:2px solid #000;flex-wrap:wrap}
+.list{width:min(620px,100%);display:flex;flex-direction:column;gap:6px}
+.wrow{display:flex;gap:12px;align-items:center;padding:6px;border:2px solid transparent;cursor:pointer;background:transparent;text-align:left;color:#fff}
+.wrow:hover{background:rgba(255,255,255,.06)}
+.wrow.sel{border-color:#fff;background:rgba(0,0,0,.4)}
+.wrow canvas{width:72px;height:72px;flex:none;border:2px solid #000}
+/* track menu: grid of cards with a minimap thumbnail each, so every track is visible at once */
+#trackList{width:min(1080px,100%);display:grid;grid-template-columns:repeat(auto-fill,minmax(138px,1fr));gap:8px;align-content:start}
+.wrow.card{flex-direction:column;align-items:stretch;gap:5px;padding:5px}
+.wrow.card canvas{width:100%;height:auto;aspect-ratio:1;image-rendering:auto}
+.wrow.card .n{font-size:15px;line-height:1.15}
+.wrow.card .d,.wrow.card .b{font-size:13px;margin-top:1px}
+.wrow .n{font-size:24px}
+.wrow .d{font-size:18px;color:var(--mc-gray);margin-top:2px}
+.wrow .b{font-size:18px;color:#b46cff;margin-top:2px}
+.optgrid{width:min(640px,100%);display:grid;grid-template-columns:1fr 1fr;gap:10px;align-content:start}
+.optwrap{width:min(640px,100%);display:flex;flex-direction:column;align-items:center;gap:18px}
+/* in-race menus: the game stays visible behind a dark veil (like Minecraft's pause screen), HUD hidden */
+.menuopen #hud,.menuopen #touch{display:none!important}
+.ingame.mcScreen,.ingame.dirt{background:rgba(0,0,0,.55)!important;box-shadow:none!important}
+.ingame.mcScreen .body{background:transparent}
+.ingame.mcScreen .hdr,.ingame.mcScreen .ftr{border-color:transparent}
+/* volume slider, always on screen (Minecraft options-slider style) */
+#vol{position:absolute;left:8px;bottom:8px;z-index:30;display:flex;align-items:center;gap:6px;pointer-events:auto;touch-action:none}
+#volIco{width:30px;height:30px;padding:0;min-width:0;display:flex;align-items:center;justify-content:center}
+#volIco svg{width:18px;height:18px;fill:#e0e0e0}
+#vol.muted #volWave{display:none}
+#volBar{position:relative;width:170px;height:30px;background:#2a2a2a;border:2px solid #000;cursor:pointer;
+  box-shadow:inset 2px 2px 0 rgba(0,0,0,.6),inset -2px -2px 0 rgba(255,255,255,.12)}
+#volFill{position:absolute;left:0;top:0;bottom:0;background:rgba(128,255,32,.22)}
+#volKnob{position:absolute;top:-2px;bottom:-2px;width:12px;margin-left:-6px;border:2px solid #000;background:var(--btn-bg) center/48px, #8b8b8b;
+  box-shadow:inset 2px 2px 0 rgba(255,255,255,.45),inset -2px -2px 0 rgba(0,0,0,.45);image-rendering:pixelated}
+#volTxt{position:absolute;inset:0;display:flex;align-items:center;justify-content:center;font-size:16px;color:#e0e0e0;text-shadow:2px 2px 0 #383838;pointer-events:none}
+#vol.muted #volTxt{color:#ff7070}
+.touch.racing #vol{left:50%;bottom:auto;top:calc(54px + env(safe-area-inset-top));transform:translateX(-50%) scale(.9)}
+.short #vol{transform:scale(.85);transform-origin:bottom left}
+.short.touch.racing #vol{transform:translateX(-50%) scale(.8);transform-origin:top center}
+#menuBtn{position:absolute;top:12px;left:50%;transform:translateX(-50%);pointer-events:auto;height:36px;font-size:17px;padding:0 14px}
+.touch #menuBtn{display:none}
+#pause .hint{font-size:15px;color:#bbb;margin-top:6px}
+.ctrls{width:min(640px,100%);font-size:20px;line-height:1.9;color:#ddd}
+.ctrls kbd{font-family:inherit;background:#555;border:2px solid #000;box-shadow:inset -2px -2px 0 #333,inset 2px 2px 0 #888;padding:0 7px;color:#fff;margin-right:2px}
+
+/* ---------- garage (inventory GUI) ---------- */
+#garage{flex-direction:row;align-items:center;justify-content:flex-start;padding-left:max(calc(var(--aw,100vw) * 0.03),10px)}
+.inv{background:var(--panel);border:2px solid #000;border-radius:3px;padding:10px 12px 14px;
+  box-shadow:inset 3px 3px 0 #fff,inset -3px -3px 0 #555;color:#3f3f3f;width:min(400px,calc(var(--aw,100vw) * 0.94))}
+.inv h3{font-size:22px;font-weight:500;margin:2px 2px 8px;color:#3f3f3f}
+.tabs{display:flex;gap:4px;margin:-10px -2px 8px}
+.tab{flex:1;height:40px;font-size:22px;color:#3f3f3f;background:#a8a8a8;border:2px solid #000;border-bottom:0;cursor:pointer;
+  box-shadow:inset 2px 2px 0 #dcdcdc,inset -2px 0 0 #6b6b6b;margin-top:6px}
+.tab.sel{background:var(--panel);height:46px;margin-top:0;box-shadow:inset 2px 2px 0 #fff,inset -2px 0 0 #555}
+.slots{display:grid;grid-template-columns:repeat(5,1fr);gap:4px}
+.slot{aspect-ratio:1;background:var(--slot);border:0;cursor:pointer;position:relative;box-shadow:inset 2px 2px 0 #373737,inset -2px -2px 0 #fff;padding:7px}
+.slot .car{width:100%;height:100%;border:2px solid #000;image-rendering:pixelated}
+.slot.sel{outline:3px solid #fff;outline-offset:-1px}
+.slot .num{position:absolute;right:4px;bottom:2px;font-size:18px;color:#fff;text-shadow:2px 2px 0 #3f3f3f}
+.tooltip{margin-top:10px;background:rgba(16,0,16,.94);border:2px solid #100010;box-shadow:inset 0 0 0 2px #2d0a63;padding:8px 10px;color:#fff;font-size:18px;line-height:1.45}
+.tooltip .tn{color:#fff;font-size:20px}
+.tooltip .tg{color:var(--mc-gray)}
+.tooltip .tb{color:#5555ff}
+.stat{display:flex;align-items:center;gap:8px}
+.stat span{width:92px;color:var(--mc-gray)}
+.stat .bar{flex:1;height:8px;background:#000;border:1px solid #000}
+.stat .bar i{display:block;height:100%;background:linear-gradient(#80ff20,#3fa000)}
+
+/* ---------- loading ---------- */
+#loading{justify-content:center;gap:16px}
+#loading .lt{font-size:26px}
+#loading .bar{width:min(400px,calc(var(--aw,100vw) * 0.8));height:10px;border:2px solid #000;background:#000}
+#loading .fill{height:100%;width:0;background:#80ff20}
+#loading .ls{font-size:18px;color:var(--mc-gray)}
+
+/* ---------- HUD ---------- */
+#hud{position:fixed;inset:0;pointer-events:none}
+#tower{position:absolute;left:14px;top:14px;width:250px;font-family:'Tiny5',monospace;color:#fff;text-shadow:2px 2px 0 #3f3f3f}
+#tower .sbT{background:rgba(0,0,0,.52);padding:4px 8px 3px;text-align:center;font-size:19px;color:#ffff55;text-shadow:2px 2px 0 #3f3f15}
+#tower .sbT b{color:#fff;font-weight:400;text-shadow:2px 2px 0 #3f3f3f}
+#tower .sbB{background:rgba(0,0,0,.36);padding:4px 8px 6px;display:flex;flex-direction:column;gap:1px}
+#tower .row{display:flex;justify-content:space-between;align-items:baseline;font-size:18px;line-height:1.25;font-variant-numeric:tabular-nums}
+#tower .row span{color:#aaaaaa;text-shadow:2px 2px 0 #2a2a2a}
+#tower .row b{font-weight:400}
+#cur{font-size:30px;line-height:1.1;color:#fff}
+#delta{min-height:20px}
+#last{color:#ffffff}
+#best{color:#ff55ff;text-shadow:2px 2px 0 #3f153f}
+#teamRow{display:flex;align-items:center;gap:8px;margin-top:3px;background:rgba(0,0,0,.36);padding:3px 8px;font-size:17px}
+#teamRow i{width:12px;height:12px;border:2px solid #000;display:block}
+#tower .sep{height:2px;background:rgba(255,255,255,.12);margin:3px 0}
+#mapItem{position:absolute;right:14px;top:14px;width:172px;height:172px;padding:7px;background:#c9b48a;border:2px solid #000;
+  box-shadow:inset 3px 3px 0 #e6d6b0,inset -3px -3px 0 #8a7650}
+#map{width:100%;height:100%;image-rendering:pixelated}
+#hotbar{position:absolute;left:50%;bottom:14px;transform:translateX(-50%);display:flex;flex-direction:column;align-items:center}
+#gearLvl{font-size:48px;line-height:1;color:#80ff20;text-shadow:3px 0 0 #000,-3px 0 0 #000,0 3px 0 #000,0 -3px 0 #000;margin-bottom:2px}
+#xp{width:min(470px,calc(var(--aw,100vw) * 0.86));height:14px;background:#000;border:2px solid #000;position:relative;display:flex;gap:2px;padding:1px}
+#xp i{flex:1;background:#2c3a16}
+#xp i.on{background:linear-gradient(#b6ff6a,#5dc21e)}
+#xp i.on.r{background:linear-gradient(#ff8080,#e01010)}
+#xp i.on.b{background:linear-gradient(#9cc4ff,#2a62ff)}
+#xp.flash i{background:linear-gradient(#9cc4ff,#2a62ff)!important}
+#bar{display:flex;gap:6px;margin-top:6px;align-items:stretch}
+.hslot{min-width:76px;height:60px;background:rgba(20,20,20,.72);border:2px solid #000;box-shadow:inset 2px 2px 0 rgba(255,255,255,.2),inset -2px -2px 0 rgba(0,0,0,.5);
+  display:flex;flex-direction:column;align-items:center;justify-content:center;padding:0 8px}
+.hslot.wide{min-width:118px}
+.hslot .v{font-size:36px;line-height:1}
+.hslot .u{font-size:13px;color:#bbb;letter-spacing:.12em}
+.ped{width:16px;padding:3px;justify-content:flex-end;min-width:0}
+.ped i{width:100%;display:block}
+#thr i{background:#4cff4c}#brk i{background:#ff4040}
+#modes{display:flex;flex-direction:column;gap:3px}
+.chip{font-size:14px;padding:1px 6px;background:#222;border:2px solid #000;color:#888}
+.chip.on{background:#2a62ff;color:#fff}
+.chip.warn{background:#ffb400;color:#111}
+#lights{position:absolute;left:50%;top:12%;transform:translateX(-50%);display:flex;gap:10px;padding:10px 14px;background:#111;border:3px solid #000;box-shadow:0 6px 0 rgba(0,0,0,.4)}
+#lights .col{display:flex;flex-direction:column;gap:6px}
+#lights .lamp{width:38px;height:38px;background:#3a1b14;border:3px solid #000;box-shadow:inset 3px 3px 0 rgba(255,255,255,.08)}
+#lights .lamp.on{background:#ff2a1a;box-shadow:0 0 18px #ff2a1a,inset 4px 4px 0 #ff9a8a}
+#msg{position:absolute;left:50%;top:30%;transform:translateX(-50%);font-size:clamp(20px,calc(var(--aw,100vw) * 0.034),34px);text-shadow:3px 3px 0 #000;opacity:0;transition:opacity .25s;text-align:center;white-space:nowrap}
+#msg.show{opacity:1}
+#toast{position:absolute;right:14px;top:200px;width:290px;display:flex;gap:10px;align-items:center;padding:8px 10px;background:#212121;border:2px solid #000;
+  box-shadow:inset 2px 2px 0 #555,inset -2px -2px 0 #000;transform:translateX(340px);transition:transform .35s}
+#toast.show{transform:none}
+#toast canvas{width:36px;height:36px;flex:none}
+#toast .a{color:var(--mc-yellow);font-size:18px}
+#toast .b{color:#fff;font-size:18px}
+#camName{position:absolute;left:14px;bottom:48px;font-size:17px;background:rgba(0,0,0,.5);padding:3px 8px;border:2px solid #000}
+#touch{position:fixed;inset:0;pointer-events:none;touch-action:none}
+#steerZone{position:absolute;left:0;top:18%;bottom:0;width:46%;pointer-events:auto;touch-action:none}
+#steerTrack{position:absolute;left:calc(18px + env(safe-area-inset-left));bottom:calc(22px + env(safe-area-inset-bottom));width:min(230px,calc(var(--aw,100vw) * 0.3));height:58px;
+  background:rgba(0,0,0,.42);border:3px solid #000;box-shadow:inset 2px 2px 0 rgba(255,255,255,.25),inset -2px -2px 0 rgba(0,0,0,.5)}
+#steerTrack::before{content:'';position:absolute;left:50%;top:6px;bottom:6px;width:2px;background:rgba(255,255,255,.35)}
+#steerKnob{position:absolute;top:5px;left:50%;width:44px;height:42px;margin-left:-22px;background:var(--btn-bg) center/48px, #8b8b8b;border:2px solid #000;
+  box-shadow:inset 2px 2px 0 rgba(255,255,255,.5),inset -2px -2px 0 rgba(0,0,0,.45);image-rendering:pixelated}
+#steerZone .hint{position:absolute;left:calc(22px + env(safe-area-inset-left));bottom:calc(88px + env(safe-area-inset-bottom));font-size:14px;color:#ddd;opacity:.85;transition:opacity .4s}
+#steerZone.used .hint{opacity:0}
+#pedals{position:absolute;right:calc(14px + env(safe-area-inset-right));bottom:calc(16px + env(safe-area-inset-bottom));display:flex;gap:10px;align-items:flex-end;pointer-events:auto;touch-action:none}
+.ped2{width:min(86px,calc(var(--aw,100vw) * 0.12));display:flex;align-items:flex-end;justify-content:center;padding-bottom:8px;font-size:17px;border:3px solid #000;
+  box-shadow:inset 3px 3px 0 rgba(255,255,255,.3),inset -3px -4px 0 rgba(0,0,0,.45);image-rendering:pixelated}
+#tB{height:min(104px,calc(var(--ah,100vh) * 0.26));background:var(--btn-bg) center/56px, #7a2a22;background-blend-mode:multiply;background-color:#c0392b}
+#tT{height:min(150px,calc(var(--ah,100vh) * 0.38));background:var(--btn-bg) center/56px, #2a7a22;background-blend-mode:multiply;background-color:#3cb371}
+.ped2.on{filter:brightness(1.35);transform:translateY(2px)}
+#tTop{position:absolute;top:calc(8px + env(safe-area-inset-top));left:50%;transform:translateX(-50%);display:flex;gap:8px;pointer-events:auto}
+.tbtn{height:38px;min-width:52px;padding:0 10px;font-size:17px;color:#e0e0e0;border:2px solid #000;background:var(--btn-bg) center/48px, #6f6f6f;
+  box-shadow:inset 2px 2px 0 rgba(255,255,255,.45),inset -2px -3px 0 rgba(0,0,0,.45);image-rendering:pixelated;touch-action:manipulation}
+.tbtn.on{color:#ffff55;border-color:#ffff55}
+#rotate{position:absolute;inset:0;z-index:20;display:flex;flex-direction:column;align-items:center;justify-content:center;gap:14px;text-align:center;padding:24px;font-size:22px}
+#rotate .ph{width:64px;height:110px;border:4px solid #fff;border-radius:8px;animation:rot 1.6s ease-in-out infinite}
+@keyframes rot{0%,20%{transform:rotate(0)}60%,100%{transform:rotate(-90deg)}}
+#fsBtn{position:fixed;left:8px;top:8px;font-size:16px;height:36px;min-width:0}
+
+#pause{background:rgba(0,0,0,.6);justify-content:center;gap:10px;z-index:5}
+#pause h2{font-size:29px;font-weight:500;margin-bottom:10px}
+#pause .mcb{width:min(400px,calc(var(--aw,100vw) * 0.88))}
+
+@media (max-width:760px){
+  #mapItem{width:118px;height:118px;padding:5px}
+  #tower{width:190px} #cur{font-size:22px} #tower .row{font-size:15px}
+  .hslot{min-width:60px;height:50px}.hslot .v{font-size:26px}.hslot.wide{min-width:84px}
+  #garage{padding:0;justify-content:center;align-items:flex-end}
+  #toast{top:160px}
+  .optgrid{grid-template-columns:1fr}
+  .mcScreen .hdr{padding:10px 0 8px;font-size:22px}
+  .wrow canvas{width:56px;height:56px}
+  #trackList{grid-template-columns:repeat(auto-fill,minmax(112px,1fr));gap:6px}
+  .wrow.card .n{font-size:13px}.wrow.card .d,.wrow.card .b{font-size:11px}
+  .wrow .n{font-size:20px}.wrow .d,.wrow .b{font-size:15px}
+}
+/* phones and tablets */
+.touch #camName{display:none}
+.touch #tower{left:calc(10px + env(safe-area-inset-left));top:calc(8px + env(safe-area-inset-top));transform:scale(.66);transform-origin:top left}
+.touch #mapItem{right:calc(10px + env(safe-area-inset-right));top:calc(8px + env(safe-area-inset-top))}
+.touch #hotbar{bottom:calc(6px + env(safe-area-inset-bottom));transform:translateX(-50%) scale(.74);transform-origin:bottom center}
+.touch #lights{top:16%;transform:translateX(-50%) scale(.62);transform-origin:top center}
+.touch #toast{top:auto;bottom:calc(150px + env(safe-area-inset-bottom))}
+.touch .mcb{min-height:44px}
+/* short screens (landscape phones, including the rotated layout) */
+.short #title{padding-top:8px}
+.short #logo{width:min(380px,calc(var(--aw,100vw) * 0.5))}
+.short #titleBtns{margin-top:8px;gap:6px}
+.short #titleBtns .mcb{height:34px;font-size:19px}
+.short #titleBtns .gap{margin-top:5px}
+.short #titleSel{margin-top:6px;font-size:15px}
+.short .mcb{height:38px;font-size:20px}.short .mcb.big{height:42px;font-size:22px}
+.short #ver,.short #legal{font-size:14px}
+.short #mapItem{width:118px;height:118px;padding:5px}
+.short.touch #mapItem{width:110px;height:110px}
+.short #garage{align-items:center}
+.short .inv{max-height:calc(var(--ah,100vh) * 0.98);overflow-y:auto;padding:4px 10px 8px}
+.short .inv h3{font-size:17px;margin:0 2px 4px}
+.short .tab{height:32px;font-size:18px}.short .tab.sel{height:36px}
+.short .stat .bar{height:6px}
+.short .inv .mcb{height:34px}
+.short .slots{grid-template-columns:repeat(5,minmax(0,52px));justify-content:center}
+.short .tooltip{font-size:15px;padding:5px 8px;line-height:1.3}
+.short .mcScreen .hdr{padding:6px 0;font-size:20px}
+.short .mcScreen .ftr{padding:6px}
+.short .mcScreen .body{padding:8px}
+.short #loading .lt{font-size:20px}
+</style>
+</head>
+<body>
+<div id="app">
+<canvas id="gl"></canvas>
+
+<!-- TITLE -->
+<div id="title" class="screen">
+  <div id="logoWrap">
+    <canvas id="logo" class="px"></canvas>
+    <div id="splash"></div>
+  </div>
+  <div id="titleBtns">
+    <button class="mcb full" id="bRace">Race</button>
+    <button class="mcb full" id="bTracks">Tracks</button>
+    <button class="mcb full" id="bGarage">Garage</button>
+    <button class="mcb gap" id="bOptions">Options...</button>
+    <button class="mcb gap" id="bControls">Controls...</button>
+  </div>
+  <div id="titleSel" class="mct"><span class="sw" id="selSw"></span><span id="selTxt"></span></div>
+  <div id="ver" class="mct">F1 but it's Minecraft 1.2</div>
+  <button class="mcb hidden" id="fsBtn">Fullscreen</button>
+  <a id="legal" class="mct" href="https://www.amsultan.site" target="_blank" rel="noopener">Built by Abdullah Sultan</a>
+</div>
+
+<!-- TRACKS -->
+<div id="tracks" class="screen mcScreen dirt hidden">
+  <div class="hdr mct">Select Track</div>
+  <div class="body"><div class="list" id="trackList"></div></div>
+  <div class="ftr">
+    <button class="mcb" id="tRace" style="width:200px">Race Selected Track</button>
+    <button class="mcb" id="tBack" style="width:200px">Done</button>
+  </div>
+</div>
+
+<!-- GARAGE -->
+<div id="garage" class="screen hidden">
+  <div class="inv">
+    <div class="tabs" id="eraTabs"></div>
+    <h3 id="chassisName">Garage</h3>
+    <div class="slots" id="teamSlots"></div>
+    <div class="tooltip" id="tip"></div>
+    <div style="display:flex;gap:8px;margin-top:10px">
+      <button class="mcb" id="gRace" style="flex:1">Race</button>
+      <button class="mcb" id="gBack" style="flex:1">Done</button>
+    </div>
+  </div>
+</div>
+
+<!-- OPTIONS -->
+<div id="options" class="screen mcScreen dirt hidden">
+  <div class="hdr mct">Options</div>
+  <div class="body"><div class="optwrap"><div class="optgrid" id="optGrid"></div><button class="mcb" id="oDone" style="width:220px">Done</button></div></div>
+</div>
+
+<!-- CONTROLS -->
+<div id="controls" class="screen mcScreen dirt hidden">
+  <div class="hdr mct">Controls</div>
+  <div class="body"><div class="ctrls mct">
+    <div><kbd>W</kbd><kbd>↑</kbd> Throttle &nbsp; <kbd>S</kbd><kbd>↓</kbd> Brake (hold at a stop to reverse)</div>
+    <div><kbd>A</kbd><kbd>D</kbd> Steer &nbsp; <kbd>C</kbd> Change camera &nbsp; <kbd>R</kbd> Reset onto the path</div>
+    <div>Hold <kbd>Right mouse</kbd> and move the mouse to look around (chase cameras)</div>
+    <div><kbd>E</kbd> DRS (2021 cars, on straights) &nbsp; <kbd>M</kbd> Mute &nbsp; <kbd>Esc</kbd> Pause</div>
+    <div>Gamepad: RT throttle · LT brake · left stick steer · Y camera</div>
+    <div>Touch: hold and slide on the left half to steer · GAS and BRAKE pedals on the right · buttons on top for pause, camera and reset</div>
+    <div style="color:#a0a0a0;margin-top:8px">Gears and clutch are automatic. Traction control, ABS and steering assist can be changed in Options. 2026 cars switch to low-drag X-mode on their own on straights.</div>
+    <div style="color:#a0a0a0;margin-top:12px;font-size:15px">Credits: block textures from Luanti / Minetest Game and the Nether mod (CC BY-SA 3.0 / 4.0). Circuit outlines from bacinger/f1-circuits (MIT). Car models supplied by the player. Liveries are colour-only, with no sponsor marks.</div>
+  </div></div>
+  <div class="ftr"><button class="mcb" id="cDone" style="width:200px">Done</button></div>
+</div>
+
+<!-- LOADING -->
+<div id="loading" class="screen dirt dark hidden">
+  <div class="lt mct" id="ltitle">Loading terrain</div>
+  <div class="bar"><div class="fill" id="lfill"></div></div>
+  <div class="ls mct" id="lstat">Generating world…</div>
+</div>
+
+<!-- HUD -->
+<div id="hud" class="hidden">
+  <div id="tower">
+    <div class="sbT">Lap <b id="lapN">–</b> <span id="trkName"></span></div>
+    <div class="sbB">
+      <div class="row"><b id="cur">0:00.000</b></div>
+      <div class="row"><span>Delta</span><b id="delta">&nbsp;</b></div>
+      <div class="sep"></div>
+      <div class="row"><span>Last</span><b id="last">–:––.–––</b></div>
+      <div class="row"><span>Best</span><b id="best">–:––.–––</b></div>
+      <div class="row"><span>Top speed</span><b id="vmax" style="color:#55ffff">0</b></div>
+    </div>
+    <div id="teamRow"><i id="teamSw"></i><span id="teamLbl"></span></div>
+  </div>
+  <div id="mapItem"><canvas id="map" width="256" height="256"></canvas></div>
+  <div id="hotbar">
+    <div id="gearLvl">N</div>
+    <div id="xp"></div>
+    <div id="bar">
+      <div class="hslot ped" id="brk"><i></i></div>
+      <div class="hslot wide"><div class="v" id="spd">0</div><div class="u">KM/H</div></div>
+      <div class="hslot wide"><div class="v" id="rpm">0</div><div class="u">RPM</div></div>
+      <div class="hslot" style="min-width:96px"><div id="modes"></div></div>
+      <div class="hslot ped" id="thr"><i></i></div>
+    </div>
+  </div>
+  <div id="lights" class="hidden"></div>
+  <div id="camName" class="mct"></div>
+  <button class="tbtn mct" id="menuBtn">Menu · Esc</button>
+  <div id="msg" class="mct"></div>
+  <div id="toast"><canvas id="toastIcon" width="16" height="16" class="px"></canvas><div><div class="a" id="toastA">Advancement Made!</div><div class="b" id="toastB"></div></div></div>
+</div>
+
+<div id="touch" class="hidden">
+  <div id="steerZone"><div id="steerTrack"><div id="steerKnob"></div></div><div class="hint mct">Hold and slide to steer</div></div>
+  <div id="pedals"><div class="ped2 mct" id="tB">BRAKE</div><div class="ped2 mct" id="tT">GAS</div></div>
+  <div id="tTop"><button class="tbtn mct" id="tPause">II</button><button class="tbtn mct" id="tCam">CAM</button><button class="tbtn mct hidden" id="tDrs">DRS</button><button class="tbtn mct" id="tReset">RESET</button></div>
+</div>
+<div id="rotate" class="screen dirt dark hidden"><div class="ph"></div><div class="mct">Turn your device sideways to race</div></div>
+
+<div id="pause" class="screen hidden">
+  <h2 class="mct">Game Menu</h2>
+  <button class="mcb" id="pResume">Back to Race</button>
+  <button class="mcb" id="pRestart">Restart from the Grid</button>
+  <button class="mcb" id="pOptions">Options…</button>
+  <button class="mcb" id="pMenu">Save and Quit to Title</button>
+  <div class="hint mct">Press Esc to get back to the race</div>
+</div>
+
+<div id="vol" title="Volume (click the speaker to mute)">
+  <button class="tbtn" id="volIco" aria-label="Mute"><svg viewBox="0 0 16 16"><path d="M2 6h3l4-3v10l-4-3H2z"/><path id="volWave" d="M11 5.5c1 .8 1.5 1.6 1.5 2.5s-.5 1.7-1.5 2.5M12.8 3.8c1.5 1.2 2.2 2.6 2.2 4.2s-.7 3-2.2 4.2" fill="none" stroke="#e0e0e0" stroke-width="1.4"/></svg></button>
+  <div id="volBar"><div id="volFill"></div><div id="volKnob"></div><div id="volTxt">Volume: 80%</div></div>
+</div>
+</div>
+<script type="importmap">{"imports":{"three":"__THREE__","three/addons/":"__ADDONS__"}}</script>
+<script type="module" src="./main.js"></script>
+</body>
+</html>
