@@ -4,13 +4,9 @@ A browser racing game: real F1 cars on real circuits, rebuilt as Minecraft-style
 
 ## Play
 
-Open `docs/index.html` through any static web server (models load with `fetch`, so opening the file directly will not work):
+**[Play the game](https://f1butitsminecraft.grok.me)**
 
-```
-npx serve docs
-```
-
-To host it, turn on GitHub Pages for this repo with the `docs/` folder as the source.
+The built files are still in `docs/` if you want to run a copy locally (`npx serve docs`). Models load with `fetch`, so opening the file directly will not work.
 
 ## Tracks
 
